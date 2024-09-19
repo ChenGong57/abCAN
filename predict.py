@@ -1,15 +1,15 @@
 import torch
 import argparse
 
-from modeling import Decoder
-from process_input import *
+from scripts.model import Decoder
+from scripts.process_input import *
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('complex_pdb', type=str)
     parser.add_argument('chains_info', type=str)
     parser.add_argument('mutation_info', type=str)
-    parser.add_argument('--load_model', default='/home/gongchen/model/ckpts/best/check/model.pt')
+    parser.add_argument('--load_model', default='ckpt/model.pt')
 
     args = parser.parse_args()
 
