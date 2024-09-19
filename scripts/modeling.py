@@ -5,27 +5,25 @@ import numpy as np
 import torch.nn.functional as F
 
 def gather_edges(edges, neighbor_idx):
-    # 完整特征Features [B,N,N,C] 在 Neighbor indices [B,N,K]处 => 得到节点邻居特征Neighbor features [B,N,K,C]
-    # edges: [B, N', N', 1]
-    # neighbor_idx: [B, N', K]  代表每个残基K个邻居的索引
-    neighbors = neighbor_idx.unsqueeze(-1).expand(-1, -1, -1, edges.size(-1))       # [B, N', K, 1]
-    edge_features = torch.gather(edges, 2, neighbors)       # [B, N', K, 1]
+    # features [B,N,N,C] at neighbor indices [B,N,K] => obtain the neighbor features [B,N,K,C] for the nodes
+    
+    neighbors = neighbor_idx.unsqueeze(-1).expand(-1, -1, -1, edges.size(-1))
+    edge_features = torch.gather(edges, 2, neighbors)
     return edge_features
 
-
 def gather_nodes(nodes, neighbor_idx):
-    # 完整特征Features [B,N,C] 在 Neighbor indices [B,N,K]处 => 得邻居特征[B,N,K,C]
-    # Flatten and expand indices per batch [B,N,K] => [B,NK] => [B,NK,C]
+    # features [B,N,C] at neighbor indices [B,N,K] => obtain the neighbor features [B,N,K,C]
+    
     neighbors_flat = neighbor_idx.view((neighbor_idx.shape[0], -1))     # [B, N'K]
     neighbors_flat = neighbors_flat.unsqueeze(-1).expand(-1, -1, nodes.size(2))     # [B, N'K, nodes.size(2)]
-    # Gather and re-pack
-    neighbor_features = torch.gather(nodes, 1, neighbors_flat)      # 每个节点的邻居特征    nodes.shape
-    neighbor_features = neighbor_features.view(list(neighbor_idx.shape)[:3] + [-1])     # [B, N', K, nodes.size(-1)]
+    neighbor_features = torch.gather(nodes, 1, neighbors_flat)
+    neighbor_features = neighbor_features.view(list(neighbor_idx.shape)[:3] + [-1])
     return neighbor_features
 
 
 class PositionalEncoding(nn.Module):
-    '''基于序列距离的位置编码'''
+    '''"Positional encoding based on sequence distance"'''
+    
     def __init__(self, pos_emb_dims, seq_neighbors, period_range=[2,1000]):
         super(PositionalEncoding, self).__init__()
         self.pos_emb_dims = pos_emb_dims
@@ -36,65 +34,53 @@ class PositionalEncoding(nn.Module):
         # E_idx [B,C*N,K] mask [B,C*N]
         N_nodes = E_idx.size(1)
         ii = torch.arange(N_nodes, dtype=torch.float32).view((1, -1, 1)).cuda()     # [1,C*N',1]
-        # ii = torch.arange(N_nodes, dtype=torch.float32).view((1, -1, 1))
         d = (E_idx.float() - ii).unsqueeze(-1)      # d: [B,C*N',K,1]
         d = d * mask.unsqueeze(-1).unsqueeze(-1)
-        # print('d1:', d.shape, d[0,:])
-        # d = torch.clamp(d, min=-20, max=20)     # 仅考虑上下游20个残基的
         d[torch.abs(d) > self.seq_neighbors] = 0
-        # print('d2:', d.shape, d[0,:])
 
-        # Original Transformer frequencies
+        # Transformer frequencies
         frequency = torch.exp(
-            torch.arange(0, self.pos_emb_dims, 2, dtype=torch.float32)    # tensor([ 0.,  2.,  4.,  6.,  8., 10., 12., 14.])
-            * -(np.log(10000.0) / self.pos_emb_dims)      # -0.5756462732485114
-        ).cuda()              # [8]    tensor([1.0000e+00, 3.1623e-01, 1.0000e-01, 3.1623e-02, 1.0000e-02, 3.1623e-03, 1.0000e-03, 3.1623e-04])
-        # frequency = torch.exp(
-        #     torch.arange(0, self.pos_emb_dims, 2, dtype=torch.float32)    # tensor([ 0.,  2.,  4.,  6.,  8., 10., 12., 14.])
-        #     * -(np.log(10000.0) / self.pos_emb_dims)      # -0.5756462732485114
-        # )              # [8]    tensor([1.0000e+00, 3.1623e-01, 1.0000e-01, 3.1623e-02, 1.0000e-02, 3.1623e-03, 1.0000e-03, 3.1623e-04])
+            torch.arange(0, self.pos_emb_dims, 2, dtype=torch.float32)
+            * -(np.log(10000.0) / self.pos_emb_dims)
+        ).cuda()
+        angles = d * frequency.view((1,1,1,-1))
 
-        angles = d * frequency.view((1,1,1,-1))       # [B, C*N', K, 8]
-        # print('angles:', angles.shape, angles[0,:])
-        E = torch.cat((torch.cos(angles), torch.sin(angles)), -1)       # [B, C*N', K, 16]
+        E = torch.cat((torch.cos(angles), torch.sin(angles)), -1)
         emask = (d.ne(0)).float().expand(-1,-1,-1,E.size(-1))
-        # print('check:', E.shape, emask.shape)
+
         E = E * emask
 
         return E
 
 
 class Normalize(nn.Module):
-    '''层/批归一化，使每个样本的每个特征在同一层上具有相似的分布，有助于训练时的稳定性'''
-    def __init__(self, features, epsilon=1e-6):     # features: args.hidden_size(256)
+
+    def __init__(self, features, epsilon=1e-6):
         super(Normalize, self).__init__()
-        self.gain = nn.Parameter(torch.ones(features))      # 可学习缩放参数，初始化为大小[args.hidden_size]全为1的一维张量
-        self.bias = nn.Parameter(torch.zeros(features))      # 可学习平移参数，初始化为大小[args.hidden_size]全为0的一维张量
-        # nn.Parameter是一个特殊的张量类，用于表示模型中可学习的参数；通过将张量包装在nn.Parameter中，pytorch将自动跟踪这些参数，使得在优化过程中能够更新它们的值
-        self.epsilon = epsilon      # 1e-06
+        self.gain = nn.Parameter(torch.ones(features))
+        self.bias = nn.Parameter(torch.zeros(features))
+        self.epsilon = epsilon
 
     def forward(self, x, dim=-1):   
         # x:   [B,N',hidden_size]
-        mu = x.mean(dim, keepdim=True)      # 计算指定维度上的均值      [B,N',1]
-        sigma = torch.sqrt(x.var(dim, keepdim=True) + self.epsilon)     #  计算指定维度上的标准差    [B,N', 1]
+        mu = x.mean(dim, keepdim=True)
+        sigma = torch.sqrt(x.var(dim, keepdim=True) + self.epsilon)   [B,N', 1]
         gain = self.gain
         bias = self.bias
 
-        return gain * (x - mu) / (sigma + self.epsilon) + bias      # 张量归一化    [B,N',hidden_size]
+        return gain * (x - mu) / (sigma + self.epsilon) + bias
 
 
 class MPNNLayer(nn.Module):
-    '''MPN网络中消息聚合与传递的过程'''
+
     def __init__(self, num_hidden, num_in, dropout):
         super(MPNNLayer, self).__init__()
 
-        # 初始化MPN层的参数
-        self.num_hidden = num_hidden    # 隐藏层的特征维度，每个节点的表示 将在这个维度上进行学习和传递
-        self.num_in = num_in    # hideen_size*2    线性变换层输入特征的维度
-        self.dropout = nn.Dropout(dropout)      # 在训练期间以一定的概率随机将节点的某些特征置0，防止过拟合
+        self.num_hidden = num_hidden
+        self.num_in = num_in
+        self.dropout = nn.Dropout(dropout)
         self.norm = Normalize(num_hidden)
 
-        # 定义MPN层中的线性变换层
         self.W = nn.Sequential(
                 nn.Linear(num_hidden + num_in, num_hidden),
                 nn.ReLU(),
@@ -109,51 +95,43 @@ class MPNNLayer(nn.Module):
             nn.ReLU(),
             nn.Linear(num_hidden, num_hidden),
         )
-        # 这里的nn.Linear没有显示定义bias，默认是有的
-        # 激活函数nn.ReLU()以及归一化层的存在都可以提高模型的表达能力和训练稳定性，但并非必须
-            # 激活函数引入了非线性变换，使得神经网络可以学习复杂的非线性关系；如果没有，多层神经网络就等效于单个线性层
-            # 激活 函数可以防止梯度爆炸或消失，提高训练的稳定性
             
     def forward(self, h_V, h_E, mask_attend):
-        '''节点的拼接和增量连结'''
         # h_V: [B, C*N', hidden_size]
         # h_E: [B, C*N, K, hidden_size*2]
         # mask_attend: [B, C*N', K]/[B, C*N]
-        if h_V.dim() != h_E.dim(): # 邻居特征融入到完整图特征中
-            h_V_expand = h_V.unsqueeze(-2).expand(-1, -1, h_E.size(-2), -1)     # 维度扩展到和邻居节点特征一致   [B, C*N', K, hidden_size]
-            h_EV = torch.cat([h_V_expand, h_E], dim=-1)  # 拼接两个特征  [B, C*N', K, hidden_size + hidden_size*2] ?为什么之前是3
-            h_message = self.W(h_EV) * mask_attend.unsqueeze(-1)    # 进行消息传播前向传播  [B, C*N', K, hidden_size]
-            dh = torch.mean(h_message, dim=-2)      # 平均池化，得到节点更新的增量  [B, C*N', hidden_size]
-            h_V = self.norm(h_V + self.dropout(dh))     # 对增量进行更新，并进行归一化和dropout    [B, C*N', hidden_size]
-        else:   # 补充节点特征
-            h_EV = torch.cat([h_V, h_E], dim=-1)    # 针对本节点特征的情况 [B,C*N,hidden_size*2]
-            h_message = self.Ws(h_EV) * mask_attend.unsqueeze(-1)   # 这里传入的mask和上一种情况的是不一样的
+        
+        if h_V.dim() != h_E.dim():
+            h_V_expand = h_V.unsqueeze(-2).expand(-1, -1, h_E.size(-2), -1)    # [B, C*N', K, hidden_size]
+            h_EV = torch.cat([h_V_expand, h_E], dim=-1)
+            h_message = self.W(h_EV) * mask_attend.unsqueeze(-1)    # [B, C*N', K, hidden_size]
+            dh = torch.mean(h_message, dim=-2)
+            h_V = self.norm(h_V + self.dropout(dh))     # [B, C*N', hidden_size]
+        else:
+            h_EV = torch.cat([h_V, h_E], dim=-1)    # [B,C*N,hidden_size*2]
+            h_message = self.Ws(h_EV) * mask_attend.unsqueeze(-1)
             h_V = self.norm(h_V + self.dropout(h_message))
 
         return h_V
 
 
 class Encoder(nn.Module):
-    '''MPN图编码层'''
+
     def __init__(self, args, node_in, edge_in, type):
         super(Encoder, self).__init__()
-        self.node_in, self.edge_in = node_in, edge_in   # 定义节点6和边39输入特征维度
+        self.node_in, self.edge_in = node_in, edge_in
         self.type = type
         self.depth = args.depth
 
-        # 定义节点特征的线性变换和归一化层
         self.W_v = nn.Sequential(
                 nn.Linear(self.node_in, args.hidden_size, bias=True),
                 Normalize(args.hidden_size)
         )
-
-        #　定义边特征的线性变换和归一化层
         self.W_e = nn.Sequential(
                 nn.Linear(self.edge_in, args.hidden_size, bias=True),
                 Normalize(args.hidden_size)
         )
 
-        # 定义多层的消息传递神经网络层
         self.coord_layers = nn.ModuleList([
                 MPNNLayer(args.hidden_size, args.hidden_size * 2, dropout=args.dropout)
                 for _ in range(self.depth)
@@ -163,27 +141,25 @@ class Encoder(nn.Module):
                 for _ in range(self.depth)
         ])
 
-        for param in self.parameters():     # [hidden_size]/[hidden_size, edge_in]/[hidden_size, node_in]/[hidden_size, hidden_size]/[hidden_size, hiddensize*4], 
+        for param in self.parameters(): 
             if param.dim() > 1:
-                nn.init.xavier_uniform_(param)      #  一种参数初始化的方法
+                nn.init.xavier_uniform_(param)
     
     def forward(self, V, E, E_idx, mask):
-        '''对特征进行图编码'''
+
         # V [B,C*N,6], E [B,C*N,K,39]/(hS) [B,C*N,hidden_size], E_idx [B,C*N,K], mask [B,C*N]
         
         vmask = gather_nodes(mask.unsqueeze(-1), E_idx).squeeze(-1)     # [B, C*N, K]
 
-        if self.type == 'coord':    # 第一步结构编码
+        if self.type == 'coord':
 
-            h_v = self.W_v(V)  # 对节点特征进行线性变化和归一化  [B, C*N, hidden_size]
-            h_e = self.W_e(E)  # 对边特征进行线性变化和归一化  [B, C*N, K, hidden_size] 
-            # nei_s = gather_nodes(hS, E_idx)     # [B, C*N, K, hidden_size]
-            # h = hS.clone()      # [B, C*N, hidden_size]
+            h_v = self.W_v(V)
+            h_e = self.W_e(E)
+
             # [B, N, 1] -> [B, N, K, 1] -> [B, N, K]
-            h = h_v     # [B, C*N, hidden_size] 
+            h = h_v
             for layer in self.coord_layers:
                 nei_v =  gather_nodes(h, E_idx)
-                # nei_h = torch.cat([nei_v, nei_s, h_e], dim=-1)  # [B, C*N, K, hidden_size*3]
                 nei_h = torch.cat([nei_v, h_e], dim=-1)
                 h = layer(h, nei_h, mask_attend=vmask)  # [B, C*N', hidden_size]
                 h = h * mask.unsqueeze(-1)  # [B, N', hidden_size]
