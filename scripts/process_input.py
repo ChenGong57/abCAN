@@ -170,29 +170,23 @@ class Proteins():
 
 
 def get_mut_pos(mut_pos):
-    
-    '''
-    输入突变体对应的突变位点mut_pos: SA239D,SB239D,DA265H,DB265H,NA297D,NB297D,IA332E,IB332E
-    返回装有突变信息的字典，key=chain_name, value=[[index],[mut_aa],[ori_aa],[icode]]
-    '''
-    # 返回字典；链名称为key，嵌套列表为value，0位是存储突变位点的列表，1位是存储突变氨基酸的列表
 
     mutation = {}
 
     for snp in mut_pos.split(','):
 
-        ori_aa = snp[0]     # 提取原本的aa
-        mut_chain = snp[1]  # 提取突变所在的链
-        mut_aa = snp[-1]    # 提取突变成的AA
+        ori_aa = snp[0]
+        mut_chain = snp[1]
+        mut_aa = snp[-1]
         try:
-            mut_index = int(snp[2:-1])     # 提取突变位点
+            mut_index = int(snp[2:-1])
             icode = ''
         except:
             mut_index = int(snp[2:-2])
             icode = snp[-2].upper()
 
         if mut_chain not in mutation: mutation[mut_chain] = [[], [], [], []]
-        if mut_index in mutation[mut_chain][0]: continue    # 保证每个位点只突变一次
+        if mut_index in mutation[mut_chain][0]: continue
         mutation[mut_chain][0].append(mut_index)
         mutation[mut_chain][1].append(mut_aa)
         mutation[mut_chain][2].append(ori_aa)
@@ -203,27 +197,19 @@ def get_mut_pos(mut_pos):
 
 def form_mut_chain(chain,  mutation_chain):
 
-    ''' 输入一条链对应的字典信息，改变mask,sequence；具有icode残基的相应修改了坐标 '''
-
-    # 获取突变信息
     mut_index = []
-    for index in mutation_chain[0]:   # [32, 92, 95]
-        # print('index:', index)
+    for index in mutation_chain[0]:
         if index not in mut_index: mut_index.append(index)
-    # mut_index = mutation_chain[0]
-    # print('mut_index:', mut_index) 
-    mut_aa = mutation_chain[1]      # [A, V, L]
-    ori_aa = mutation_chain[2]      # [L, R, K]
-    mut_icode = mutation_chain[3]       # ['', '', 'A']
+            
+    mut_aa = mutation_chain[1]
+    ori_aa = mutation_chain[2]
+    mut_icode = mutation_chain[3]
 
-    # 获取原始信息
     sequence = chain['sequence']
     seq_index = chain['seq_index']
     mask = copy.deepcopy(chain['mask'])
-
     coords = chain['coords']
 
-    # 如果突变涉及到residue_icode的情况，需要相应地替换原始序列和原始坐标
     if 'residues_icode' in chain:
         residues_icode = {}
         for pos in chain['residues_icode'] :
@@ -232,30 +218,29 @@ def form_mut_chain(chain,  mutation_chain):
         for i, mut in enumerate(mut_index):
 
             if mut not in residues_icode: continue
-            icode = mut_icode[i]    # 提取突变对应的残基标识
+            icode = mut_icode[i]
 
             if icode not in residues_icode[mut]: continue
-            index = seq_index.index(mut)    # 序列中要替换的AA位次
-            aa_dict = residues_icode[mut][icode]    # 准备替换的icode残基信息
+            index = seq_index.index(mut)
+            aa_dict = residues_icode[mut][icode]
 
             sequence = sequence[:index] + ori_aa[i] + sequence[index + 1 :]
 
             coords_new = aa_dict['coords']
-            for atom in coords:     # 四个骨架原子对应的位置都要修改
+            for atom in coords:
                 coords[atom][index] = coords_new[atom]
     ori_sequence = sequence
 
-    # 突变
     for i, mut in enumerate(mut_index):
         
         if mut not in seq_index: continue
         index = seq_index.index(mut)
-        mask[index] += 2    # 突变位点对应的mask值变为3
+        mask[index] += 2
 
         if sequence[index] == ori_aa[i]:
             # print('mut from', ori_aa[i], 'to', mut_aa[i], 'at', mut)
             sequence = sequence[:index] + mut_aa[i] + sequence[index + 1: ]
-        else:   # 检查机制
+        else:
             print('sequence[index]:', sequence[index])
             print('ori_aa:', ori_aa[i])
             raise ValueError("not match the origin aa")
@@ -281,17 +266,15 @@ def get_chains_dict(mutation_info, strct):
 
 
 def completize(protein, esm = None):
-    '''复制空白mut_seq，拼接链信息列表为一个完整张量 '''
 
     l_max = 0
     for chain in protein:
         l_max = max(l_max, len(chain['mask']))
     chain_num = len(protein)
 
-    # 生成掩码mask, 核心AA标识L, 坐标X，突变前后序列oS, mS
     M = np.zeros([chain_num, l_max], dtype=np.float32)
     L = np.zeros([chain_num, l_max], dtype=np.float32)
-    X = np.zeros([chain_num, l_max, 4, 3])     # 坐标填充用大数 以免混淆
+    X = np.zeros([chain_num, l_max, 4, 3])
     if esm == None:
         oS = np.zeros([chain_num, l_max], dtype=np.float32)
         mS = np.zeros([chain_num, l_max], dtype=np.float32)
