@@ -1,5 +1,5 @@
 # abCAN: a Practical and Biology-aligned Attention Network for Predicting Mutant Antibody Affinity.
-
+![image](https://github.com/ChenGong57/abCAN/blob/main/data/architecture.png)
 ## Dependencies
 Our model in tested in Linux with the following packages:
 - CUDA >= 11.8
