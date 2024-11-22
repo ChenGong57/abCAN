@@ -1,6 +1,6 @@
-# abCAN: a Practical and Biology-aligned Attention Network for Predicting Mutant Antibody Affinity.
+# abCAN: a Practical and Novel Attention Network for Predicting Mutant Antibody Affinity.
 ![image](https://github.com/ChenGong57/abCAN/blob/main/data/architecture.png)
-WT stands for wild-type, meaning the antibody-antigen complex before mutation.
+WT stands for wild-type, referring to the pre-mutant antibody-antigen complex.
 ## Dependencies
 Our model in tested in Linux with the following packages:
 - CUDA >= 11.8
@@ -13,6 +13,6 @@ Our model takes an input of a PDB file of the wild-type antibody-antigin complex
 
 **Note:** The wild type complex simply stands for complex before mutation, it can be any complex to be optimized (e.g. a complex from Protein Data Bank).
 
-For example, complex `1ahw.pdb` is an antibody (chain A,B) and antigen (chain C) complex. Assume there're two mutations (position 138 Leucine changes to Alanine; position 139 Aspartic acid changes to Alanie) on chain C, run this command:
+For example, complex `2B2X.pdb` is an antibody (chain H,L) and antigen (chain A) complex. Assume there're three mutations (position 50 tyrosine changes to threonine; position 64 glutamic acid changes to lysine; position 99 phenylalanine changes to tryptophan) on chain H and two mutations (position 28 alutamine changes to serine; position 52 tyrosine changes to asparagine) on chain L, run this command:
 ```
-python predict.py ./data/1AHW.pdb AB_C KC138A,DC139A
+python predict.py ./data/2B2X.pdb HL_A VH50T,EH64K,FH99W,QL28S,YL52N
