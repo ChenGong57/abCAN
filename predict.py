@@ -9,7 +9,7 @@ if __name__ == '__main__':
     parser.add_argument('complex_pdb', type=str)
     parser.add_argument('chains_info', type=str)
     parser.add_argument('mutation_info', type=str)
-    parser.add_argument('--load_model', default='./ckpt/model.pt')
+    parser.add_argument('--load_model', default='./ckpt/pre-trained_model.pt')
 
     args = parser.parse_args()
 
